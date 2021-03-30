@@ -89,3 +89,133 @@ HMACSHA256(base64UrlEncode(header) + "." + base64UrlEncode(payload), secret)
 django-admin startproject [project_name] .
 django-admin startapp [app_name]
 ```
+
+- 프로젝트 기본 세팅
+
+```python
+# project_name으로 설정한 폴더 내 setting.py 파일에 아래 내용을 추가
+INSTALLED_APPS = [
+    'rest_framework',
+    'djoser',
+    'api.apps.ApiConfig', # <- api 경로에 맞춰 작성할 것
+    'corsheaders',
+]
+
+MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
+]
+
+CORS_ORIGIN_WHITELIST = [
+    "http://localhost:3000" # <- 프론트에서 사용하는 주소를 적으면 된다 포트번호 주의!
+]
+
+REST_FRAMEWORK = {
+    'DEFAULT_PERMISSION_CLASSES':[
+        'rest_framework.permissions.IsAuthenticated', # 인증된 유저만 API를 열람할 수 있도록 하기
+    ],
+    'DEFAULT_AUTHENTICATION_CLASSES':[
+        'rest_framework_simplejwt.authentication.JWTAuthentication', # jwt를 사용하여 인증을 진행
+    ]
+}
+
+SIMPLE_JWT = {
+    'AUTH_HEADER_TYPES': ('JWT',),
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60), # 타임델타를 사용하여 jwt 토큰의 유효기간을 60분으로 설정
+}
+
+TIME_ZONE = 'Asia/Seoul'
+```
+
+- api의 모델 설정
+
+```python
+# api 폴더 내 models.py
+from django.db import models
+from django.contrib.auth.models import User # django에서 기본적으로 지원하는 User 모델
+
+class Blog(models.Model):
+    user = models.ForeignKey(                # RDBMS에서 주로 사용되는 foreign key와 동일
+        User,                                # 첫번째 인자로 어떤 데이터와 연관될 것인지를 받고
+        on_delete=models.CASCADE,            # 두번째 인자로 삭제될 때 어떻게 삭제될 것인지의 옵션을 받음
+    )
+    title = models.CharField(max_length=300) # 해당 데이터의 타입을 정의 (CharField의 길이 100)
+    content = models.TextField()
+    tags = models.ManyToManyField('Tag')     # 다대다관계로 기본 Foreign key와 동일하나 관련된 객체를 필드의 RelatedManager를 사용해 추가, 삭제, 생성할 수 있다
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.title
+```
+
+- 모델을 작성하였다면 해당 모델을 이전(migration)시켜준다
+
+```
+python manage.py makemigrations
+python manage.py migrate
+```
+
+- API 내부에서 암호화를 설정한다
+
+```python
+# api 폴더 내에 serializers.py를 새로 작성
+class UserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ('id', 'username', 'password')
+        extra_kwargs = {'password': {'write_only': True, 'required': True, 'min_length': 5}} # Meta Class write only 설정
+
+     def create(self, validated_data):
+        user = User.objects.create_user(**validated_data) # django에서 지원하는 create_user 메소드를 사용하면 유저의 정보를 자동으로 해쉬화해준다
+        return user
+```
+
+- 작성한 REST API에 접근하기 위한 URL도 작성한다
+
+```python
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from . import views
+
+
+router = DefaultRouter()
+router.register('get-blogs', views.BlogReadOnlyView)
+
+app_name = 'blog'
+
+urlpatterns =[
+    path('', include(router.urls)),
+    path('', include('djoser.urls.jwt')),
+    path('register/', views.CreateUserView.as_view(), name='register'),
+    path('delete-blog/<str:pk>/', views.DeleteBlogView.as_view(), name='delete-blog'),
+]
+```
+
+- 해당 api를 프로젝트 쪽에서 접근하기 위해서는 project 쪽 url에 위에서 작성한 REST API의 URL을 포함시켜주어야 한다
+- 또, admin 페이지에서 모델을 관리하려면 모델들을 등록시켜주어야 함
+
+```python
+# [project_name] 폴더 내 urls.py
+from django.contrib import admin
+from django.urls import path, include
+
+urlpatterns = [
+    path('admin/', admin.site.urls),
+    path('api/', include('api.urls')),
+]
+
+# [REST API] 폴더 내 admin.py
+from django.contrib import admin
+from . import models
+
+admin.site.register(models.Tag)
+admin.site.register(models.Blog)
+
+```
+
+- 마지막으로 superuser를 작성한다
+
+```
+This password is too common.
+This password is entirely numeric.
+// 라는 메세지가 뜨면 너무 간단한 비밀번호이므로 실제로 사용할 때엔 주의할 것
+```
