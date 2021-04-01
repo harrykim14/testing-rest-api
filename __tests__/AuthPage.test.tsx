@@ -60,7 +60,7 @@ const handlers = [
 
 const server = setupServer(...handlers)
 
-beforeAll(async () => {
+beforeAll(() => {
   server.listen()
 })
 afterEach(() => {
